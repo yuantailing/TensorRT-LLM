@@ -14,6 +14,7 @@
 # limitations under the License.
 import unittest
 
+import os
 import torch
 from parameterized import parameterized
 
@@ -25,6 +26,8 @@ has_setup_max_sm_count = False
 class TestMoeAlltoAllSingleGPU(unittest.TestCase):
 
     def setUp(self):
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        torch.cuda.set_device(local_rank)
         torch.manual_seed(0x1234)
         tllm.logger.set_level('error')
 
@@ -45,7 +48,6 @@ class TestMoeAlltoAllSingleGPU(unittest.TestCase):
     def test_moe_alltoall_single_gpu(self, input_entry_count,
                                      output_entry_count, vector_dim,
                                      send_recv_count, dtype):
-        torch.cuda.set_device(0)
         # Create a random input tensor
         input_tensor = torch.randn(input_entry_count,
                                    vector_dim,
@@ -123,29 +125,43 @@ class TestMoeAlltoAllSingleGPU(unittest.TestCase):
         torch.cuda.synchronize()
 
     @parameterized.expand([
-        (2, 5, 8, torch.float16),  # small input as smoke test
-        (2, 1, 8, torch.float16),  # some ranks have no data to send/recv
-        (4, 5, 8, torch.float16),  # small input with larger world size
-        (4, 901, 32768, torch.bfloat16),  # large input that reuses workspace
-        (8, 901, 32768,
+        ("single_gpu", 2, 5, 8, torch.float16),  # small input as smoke test
+        ("single_gpu", 2, 1, 8, torch.float16),  # some ranks have no data to send/recv
+        ("single_gpu", 4, 5, 8, torch.float16),  # small input with larger world size
+        ("single_gpu", 4, 901, 32768, torch.bfloat16),  # large input that reuses workspace
+        ("single_gpu", 8, 901, 32768,
          torch.float16),  # large input that reuses workspace, larger world size
         (
-            8, 16384, 128, torch.float16
+            "single_gpu", 8, 16384, 128, torch.float16
         ),  # large input count with small vector dim that requires more indices per fifo
+        ("multi_gpu", 2, 5, 8, torch.float16),
+        ("multi_gpu", 2, 1, 8, torch.float16),
+        ("multi_gpu", 4, 5, 8, torch.float16),
+        ("multi_gpu", 4, 901, 32768, torch.bfloat16),
+        ("multi_gpu", 8, 901, 32768, torch.float16),
+        ("multi_gpu", 8, 16384, 128, torch.float16),
     ])
-    def test_moe_alltoall_multi_rank_single_gpu(self, world_size,
-                                                input_entry_per_rank,
-                                                vector_dim, dtype):
-        torch.cuda.set_device(0)
-        max_world_size = 8
-        assert world_size <= max_world_size, f"should run with world_size at most {max_world_size}"
+    def test_moe_alltoall_multi_rank(self, single_or_multi,
+                                     world_size, input_entry_per_rank,
+                                     vector_dim, dtype):
+        single_gpu = single_or_multi == "single_gpu"
+        if single_gpu:
+            max_world_size = 8
+            assert world_size <= max_world_size, f"should run with world_size at most {max_world_size}"
 
-        global has_setup_max_sm_count
-        if not has_setup_max_sm_count:
-            sm_count = torch.cuda.get_device_properties(0).multi_processor_count
-            max_sm_count = sm_count // max_world_size  # we use single gpu to test multiple gpu communication
-            torch.ops.trtllm.set_moe_max_usable_sm_count(max_sm_count)
-            has_setup_max_sm_count = True
+            global has_setup_max_sm_count
+            if not has_setup_max_sm_count:
+                sm_count = torch.cuda.get_device_properties(0).multi_processor_count
+                max_sm_count = sm_count // max_world_size  # we use single gpu to test multiple gpu communication
+                torch.ops.trtllm.set_moe_max_usable_sm_count(max_sm_count)
+                has_setup_max_sm_count = True
+        else:
+            if "WORLD_SIZE" not in os.environ:
+                self.skipTest("not in an MPI environment")
+            global_world_size = int(os.environ["WORLD_SIZE"])
+            if world_size > global_world_size:
+                self.skipTest("not enough ranks")
+            global_rank = int(os.environ["RANK"])
 
         # Create a random input tensor
         input_tensor = torch.randn(input_entry_per_rank * world_size,
@@ -209,6 +225,7 @@ class TestMoeAlltoAllSingleGPU(unittest.TestCase):
         recv_ids_all_ranks = []
         recv_cumsum_all_ranks = []
 
+        ref_output_tensors_all_ranks = []
         output_tensors_all_ranks = []
 
         total_recv_all_ranks_cpu = []
@@ -234,6 +251,9 @@ class TestMoeAlltoAllSingleGPU(unittest.TestCase):
             recv_cumsum_all_ranks.append(local_recv_cumsum)
             total_recv_count = local_recv_cumsum[-1].cpu()
             total_recv_all_ranks_cpu.append(total_recv_count)
+            ref_output_tensors_all_ranks.append(ref_output_tensor[
+                output_start_current_rank:output_start_current_rank +
+                total_recv_count])
             output_tensors_all_ranks.append(output_tensor[
                 output_start_current_rank:output_start_current_rank +
                 total_recv_count])
@@ -243,39 +263,62 @@ class TestMoeAlltoAllSingleGPU(unittest.TestCase):
                                           device=torch.device('cuda'))
             recv_ids_all_ranks.append(local_recv_ids)
 
-        cuda_streams_all_ranks = [
-            torch.cuda.Stream() for _ in range(world_size)
-        ]
-
         workspace_size = torch.ops.trtllm.get_moe_commworkspace_size_per_rank(
             world_size)
-        all_workspaces = torch.zeros(world_size,
-                                     workspace_size,
-                                     dtype=torch.uint64,
-                                     device=torch.device('cuda'))
 
-        # do one warmup for each rank to avoid possible synchronization at first launch.
-        for rank in range(world_size):
-            with torch.cuda.stream(cuda_streams_all_ranks[rank]):
-                self.do_warmup()
+        if single_gpu:
+            cuda_streams_all_ranks = [
+                torch.cuda.Stream() for _ in range(world_size)
+            ]
 
-        torch.cuda.synchronize()
+            all_workspaces = torch.zeros(world_size,
+                                         workspace_size,
+                                         dtype=torch.uint64,
+                                         device=torch.device('cuda'))
 
-        # do alltoall in parallel
-        for rank in range(world_size):
-            with torch.cuda.stream(cuda_streams_all_ranks[rank]):
+            # do one warmup for each rank to avoid possible synchronization at first launch.
+            for rank in range(world_size):
+                with torch.cuda.stream(cuda_streams_all_ranks[rank]):
+                    self.do_warmup()
+
+            torch.cuda.synchronize()
+
+            # do alltoall in parallel
+            for rank in range(world_size):
+                with torch.cuda.stream(cuda_streams_all_ranks[rank]):
+                    torch.ops.trtllm.moe_comm(
+                        input_tensors_all_ranks[rank], send_cumsum_all_ranks[rank],
+                        send_ids_all_ranks[rank], output_tensors_all_ranks[rank],
+                        recv_cumsum_all_ranks[rank], recv_ids_all_ranks[rank],
+                        all_workspaces, rank, world_size)
+            for rank in range(world_size):
+                cuda_streams_all_ranks[rank].synchronize()
+
+            for rank in range(world_size):
+                self.assertTrue(torch.equal(output_tensors_all_ranks[rank], ref_output_tensors_all_ranks[rank]))
+        else:
+            if tllm.MnnvlMemory.comm is not None:
+                tllm.MnnvlMemory.comm.Free()
+                tllm.MnnvlMemory.comm = None
+            tllm.MnnvlMemory.comm = tllm.mpi_comm().Split(
+                int(global_rank >= world_size),
+                global_rank)
+            if global_rank < world_size:
+                rank = global_rank
+                mapping = tllm.Mapping(
+                    world_size=world_size,
+                    rank=rank,
+                    tp_size=world_size,
+                    moe_ep_size=world_size)
+                moe_workspace = tllm.MnnvlMemory(mapping, workspace_size)
+                all_workspaces = moe_workspace.as_torch_strided_tensor(torch.uint64)
                 torch.ops.trtllm.moe_comm(
                     input_tensors_all_ranks[rank], send_cumsum_all_ranks[rank],
                     send_ids_all_ranks[rank], output_tensors_all_ranks[rank],
                     recv_cumsum_all_ranks[rank], recv_ids_all_ranks[rank],
                     all_workspaces, rank, world_size)
-        for rank in range(world_size):
-            cuda_streams_all_ranks[rank].synchronize()
-
-        torch.testing.assert_close(output_tensor,
-                                   ref_output_tensor,
-                                   atol=1e-5,
-                                   rtol=1e-5)
+                torch.cuda.synchronize()
+                self.assertTrue(torch.equal(output_tensors_all_ranks[rank], ref_output_tensors_all_ranks[rank]))
 
     @parameterized.expand([
         (0, 8, 256, 4, 3, False),
@@ -293,7 +336,6 @@ class TestMoeAlltoAllSingleGPU(unittest.TestCase):
             self, ep_rank: int, ep_size: int, expert_count: int, top_k: int,
             max_token_count_per_rank: int,
             use_real_rank_token_count_cumsum: bool):
-        torch.cuda.set_device(0)
         gathered_target_rank_ids = torch.randint(
             0,
             ep_size, (ep_size * max_token_count_per_rank, top_k),
@@ -406,7 +448,6 @@ class TestMoeAlltoAllSingleGPU(unittest.TestCase):
     def test_moe_local_gather(self, ep_rank: int, ep_size: int,
                               expert_count: int, top_k: int,
                               max_token_count_per_rank: int):
-        torch.cuda.set_device(0)
         rank_token_count_cumsum = torch.randint(0,
                                                 max_token_count_per_rank + 1,
                                                 (ep_size, ),
