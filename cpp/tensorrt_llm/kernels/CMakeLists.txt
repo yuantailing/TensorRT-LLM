@@ -73,6 +73,7 @@ target_include_directories(
     $<TARGET_PROPERTY:${INTERNAL_CUTLASS_KERNELS_TARGET},INTERFACE_INCLUDE_DIRECTORIES>
 )
 add_cuda_architectures(kernels_src 89)
+target_link_libraries(kernels_src PUBLIC cuda)
 
 add_subdirectory(cutlass_kernels)
 add_subdirectory(flashMLA)

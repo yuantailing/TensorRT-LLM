@@ -53,6 +53,7 @@
 #include "tensorrt_llm/common/envUtils.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/cutlass_type_conversion.h"
 #include "tensorrt_llm/kernels/preQuantScaleKernel.h"
+#include "tensorrt_llm/kernels/prefetch.h"
 #include "tensorrt_llm/kernels/quantization.cuh"
 
 #include "tensorrt_llm/kernels/cutlass_kernels/include/moe_util_kernels.h"
@@ -3057,7 +3058,8 @@ void CutlassMoeFCRunner<T, WeightType, OutputType, InputType, BackBoneType, Enab
     TmaWarpSpecializedGroupedGemmInput::ElementSF* fc2_fp4_act_flat, QuantParams quant_params, int64_t const num_rows,
     int64_t const expanded_num_rows, int64_t const hidden_size, int64_t const inter_size,
     int const num_experts_per_node, ActivationParams fc1_activation_type, float const** alpha_scale_ptr_array,
-    bool bias_is_broadcast, cudaStream_t stream, cutlass_extensions::CutlassGemmConfig config, bool min_latency_mode,
+    bool bias_is_broadcast, cudaStream_t stream, bool prefetch, void const* fc2_expert_weights_void,
+    cudaStream_t prefetch_stream, cutlass_extensions::CutlassGemmConfig config, bool min_latency_mode,
     int* num_active_experts_per, int* active_expert_global_ids)
 {
 
@@ -3117,6 +3119,46 @@ void CutlassMoeFCRunner<T, WeightType, OutputType, InputType, BackBoneType, Enab
         gemm_runner.moeGemm(universal_input, tma_ws_input);
 
         sync_check_cuda_error(stream);
+
+        if (prefetch)
+        {
+            static cudaEvent_t prefetch_event;
+            static std::once_flag prefetch_event_init_flag;
+            std::call_once(
+                prefetch_event_init_flag, []() { cudaEventCreateWithFlags(&prefetch_event, cudaEventDisableTiming); });
+            cudaEventRecord(prefetch_event, stream);
+            cudaStreamWaitEvent(prefetch_stream, prefetch_event, 0);
+            char const* prefetch_env = std::getenv("TRTLLM_GEMM2_PREFETCH_PARAMS");
+            int cute_params[5];
+            std::istringstream iss(prefetch_env);
+            std::string token;
+            int idx = 0;
+            while (std::getline(iss, token, ':'))
+            {
+                if (idx >= 5)
+                    break;
+                try
+                {
+                    cute_params[idx] = std::stoi(token);
+                }
+                catch (...)
+                {
+                    TLLM_THROW("TRTLLM_GEMM2_PREFETCH_PARAMS environment variable contains non-integer value");
+                }
+                ++idx;
+            }
+            if (idx != 5 || iss.rdbuf()->in_avail() != 0)
+            {
+                TLLM_THROW(
+                    "TRTLLM_GEMM2_PREFETCH_PARAMS environment variable must contain exactly 5 colon-separated "
+                    "integers");
+            }
+            if (cute_params[4] != -1)
+            {
+                cute_host_prefetch<uint8_t, 64, 256>((uint8_t const*) fc2_expert_weights_void, cute_params[0],
+                    cute_params[1], cute_params[2], cute_params[3], cute_params[4], 2, false, prefetch_stream);
+            }
+        }
 
         // TODO: when bias_is_broadcast is false, fuse bias to gemm
         using GatedActOutputType = std::conditional_t<use_w4afp8, BackBoneType, T>;
@@ -3710,8 +3752,9 @@ void CutlassMoeFCRunner<T, WeightType, OutputType, InputType, BackBoneType, Enab
             fc1_expert_biases, num_valid_tokens_ptr, fc1_int_scales, fc1_fp8_dequant,
             use_wfp4afp8 ? fc2_wfp4afp8_quant_scale : fc2_fp8_quant, input_sf /*input fp4 scale or expanded fp4 scale*/,
             fc2_fp4_act_scale_, quant_params, num_rows, expanded_num_rows, hidden_size, inter_size,
-            num_experts_per_node, fc1_activation_type, alpha_scale_ptr_array_fc1_, !use_lora, stream, *gemm1_config_,
-            true, min_latency_params.num_active_experts_per_node, min_latency_params.active_expert_global_ids);
+            num_experts_per_node, fc1_activation_type, alpha_scale_ptr_array_fc1_, !use_lora, stream, false, nullptr,
+            nullptr, *gemm1_config_, true, min_latency_params.num_active_experts_per_node,
+            min_latency_params.active_expert_global_ids);
         sync_check_cuda_error(stream);
 
         auto gemm2_input = applyPrequantScale(smoothed_act_, fc1_result_, quant_params.groupwise.fc2.act_scales,
@@ -3806,12 +3849,23 @@ void CutlassMoeFCRunner<T, WeightType, OutputType, InputType, BackBoneType, Enab
                 num_valid_tokens_ptr, expanded_num_rows, hidden_size, use_awq, stream);
         }
         sync_check_cuda_error(stream);
+        static cudaStream_t prefetch_stream;
+        static cudaEvent_t prefetch_event;
+        static std::once_flag prefetch_stream_init_flag;
+        std::call_once(prefetch_stream_init_flag,
+            []()
+            {
+                cudaStreamCreateWithFlags(&prefetch_stream, cudaStreamNonBlocking);
+                cudaEventCreateWithFlags(&prefetch_event, cudaEventDisableTiming);
+            });
+        char const* prefetch_env = std::getenv("TRTLLM_GEMM2_PREFETCH_PARAMS");
+        bool prefetch = prefetch_env != nullptr;
         Self::gemm1(moe_gemm_runner_, blockscale_gemm_runner, gemm1_input, fc1_result_, glu_inter_result_,
             expert_first_token_offset_, gemm1_tma_ws_input, fc1_expert_weights, fc1_expert_biases, num_valid_tokens_ptr,
             fc1_int_scales, fc1_fp8_dequant, use_wfp4afp8 ? fc2_wfp4afp8_quant_scale : fc2_fp8_quant,
             fc1_fp4_act_scale_, fc2_fp4_act_scale_, quant_params, num_rows, expanded_num_rows, hidden_size, inter_size,
-            num_experts_per_node, fc1_activation_type, alpha_scale_ptr_array_fc1_, !use_lora, stream, *gemm1_config_,
-            false, nullptr, nullptr);
+            num_experts_per_node, fc1_activation_type, alpha_scale_ptr_array_fc1_, !use_lora, stream, prefetch,
+            fc2_expert_weights_void, prefetch_stream, *gemm1_config_, false, nullptr, nullptr);
         sync_check_cuda_error(stream);
 
         if (use_lora)
@@ -3833,6 +3887,11 @@ void CutlassMoeFCRunner<T, WeightType, OutputType, InputType, BackBoneType, Enab
             use_lora, lora_fc2_result_, stream, parallelism_config, enable_alltoall, *gemm2_config_, false, nullptr,
             nullptr);
         sync_check_cuda_error(stream);
+        if (prefetch)
+        {
+            cudaEventRecord(prefetch_event, prefetch_stream);
+            cudaStreamWaitEvent(stream, prefetch_event, 0);
+        }
     }
 }
 
@@ -4790,6 +4849,9 @@ void GemmProfilerBackend::runProfiler(int original_num_tokens, Config const& tac
             !mUseLora,                                                                //
             /*use_deepseek_fp8_block_scale=*/false,                                   //
             stream,                                                                   //
+            false,                                                                    //
+            nullptr,                                                                  //
+            nullptr,                                                                  //
             tactic,                                                                   //
             mMinLatencyMode,                                                          //
             num_active_experts_per_node,                                              //

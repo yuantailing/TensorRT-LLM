@@ -476,9 +476,9 @@ public:
         TmaWarpSpecializedGroupedGemmInput::ElementSF* fc2_fp4_act_flat, QuantParams quant_params,
         int64_t const num_rows, int64_t const expanded_num_rows, int64_t const hidden_size, int64_t const inter_size,
         int const num_experts_per_node, ActivationParams fc1_activation_type, float const** alpha_scale_ptr_array,
-        bool bias_is_broadcast, bool use_deepseek_fp8_block_scale, cudaStream_t stream,
-        cutlass_extensions::CutlassGemmConfig config, bool min_latency_mode, int* num_active_experts_per,
-        int* active_expert_global_ids)
+        bool bias_is_broadcast, bool use_deepseek_fp8_block_scale, cudaStream_t stream, bool prefetch,
+        void const* fc2_expert_weights_void, cudaStream_t prefetch_stream, cutlass_extensions::CutlassGemmConfig config,
+        bool min_latency_mode, int* num_active_experts_per, int* active_expert_global_ids)
         = 0;
 
     virtual void gemm2(void const* const input, void* const gemm_output, void* const final_output,
@@ -640,8 +640,9 @@ public:
         TmaWarpSpecializedGroupedGemmInput::ElementSF* fc2_fp4_act_flat, QuantParams quant_params,
         int64_t const num_rows, int64_t const expanded_num_rows, int64_t const hidden_size, int64_t const inter_size,
         int const num_experts_per_node, ActivationParams fc1_activation_type, float const** alpha_scale_ptr_array,
-        bool bias_is_broadcast, cudaStream_t stream, cutlass_extensions::CutlassGemmConfig config,
-        bool min_latency_mode, int* num_active_experts_per, int* active_expert_global_ids);
+        bool bias_is_broadcast, cudaStream_t stream, bool prefetch, void const* fc2_expert_weights_void,
+        cudaStream_t prefetch_stream, cutlass_extensions::CutlassGemmConfig config, bool min_latency_mode,
+        int* num_active_experts_per, int* active_expert_global_ids);
 
     static void gemm2(MoeGemmRunner<T, WeightType, OutputType, ScaleBiasType>& gemm_runner,
         DeepSeekBlockScaleGemmRunner* fp8_blockscale_gemm_runner, T const* const input, void* const gemm_output,
@@ -668,9 +669,9 @@ public:
         TmaWarpSpecializedGroupedGemmInput::ElementSF* fc2_fp4_act_flat, QuantParams quant_params,
         int64_t const num_rows, int64_t const expanded_num_rows, int64_t const hidden_size, int64_t const inter_size,
         int const num_experts_per_node, ActivationParams fc1_activation_type, float const** alpha_scale_ptr_array,
-        bool bias_is_broadcast, bool use_deepseek_fp8_block_scale, cudaStream_t stream,
-        cutlass_extensions::CutlassGemmConfig config, bool min_latency_mode, int* num_active_experts_per,
-        int* active_expert_global_ids) override
+        bool bias_is_broadcast, bool use_deepseek_fp8_block_scale, cudaStream_t stream, bool prefetch,
+        void const* fc2_expert_weights_void, cudaStream_t prefetch_stream, cutlass_extensions::CutlassGemmConfig config,
+        bool min_latency_mode, int* num_active_experts_per, int* active_expert_global_ids) override
     {
         auto* block_scale_gemm_runner = use_deepseek_fp8_block_scale ? getDeepSeekBlockScaleGemmRunner() : nullptr;
         return Self::gemm1(moe_gemm_runner_, block_scale_gemm_runner, static_cast<T const*>(input),
@@ -678,8 +679,9 @@ public:
             static_cast<WeightType const*>(fc1_expert_weights), static_cast<ScaleBiasType const*>(fc1_expert_biases),
             num_valid_tokens_ptr, static_cast<ScaleBiasType const*>(fc1_int_scales), fc1_fp8_dequant, fc2_fp8_quant,
             fc1_fp4_act_flat, fc2_fp4_act_flat, quant_params, num_rows, expanded_num_rows, hidden_size, inter_size,
-            num_experts_per_node, fc1_activation_type, alpha_scale_ptr_array, bias_is_broadcast, stream, config,
-            min_latency_mode, num_active_experts_per, active_expert_global_ids);
+            num_experts_per_node, fc1_activation_type, alpha_scale_ptr_array, bias_is_broadcast, stream, prefetch,
+            fc2_expert_weights_void, prefetch_stream, config, min_latency_mode, num_active_experts_per,
+            active_expert_global_ids);
     }
 
     void gemm2(void const* const input, void* const gemm_output, void* const final_output,
