@@ -1,6 +1,7 @@
 import copy
 import datetime
 import enum
+import gc
 import json
 import os
 import time
@@ -694,6 +695,7 @@ def worker_main(
     tokenizer: Optional[TokenizerBase] = None,
     llm_args: Optional[TorchLlmArgs] = None,
 ) -> None:
+    gc.disable()
     mpi_comm().barrier()
     print_colored_debug(f"Worker {mpi_rank()} entering worker_main...\n",
                         "green")

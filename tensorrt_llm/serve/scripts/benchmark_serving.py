@@ -775,8 +775,7 @@ def main(args: argparse.Namespace):
         sampling_params["temperature"] = 0.0  # Default to greedy decoding.
 
     # Avoid GC processing "static" data - reduce pause times.
-    gc.collect()
-    gc.freeze()
+    gc.disable()
 
     benchmark_result = asyncio.run(
         benchmark(

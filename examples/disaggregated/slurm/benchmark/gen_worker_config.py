@@ -113,7 +113,8 @@ def gen_config_file(work_dir: str,
             'max_tokens_in_buffer': cache_transceiver_max_num_tokens,
             'backend': 'DEFAULT',
         },
-        'stream_interval': 20,
+        'stream_interval': 100,
+        'num_postprocess_workers': 4,
     }
 
     if gen_tp_size == 8 and not gen_enable_attention_dp:
