@@ -45,6 +45,12 @@ namespace tensorrt_llm::kernels::moe_comm
 #define SWITCH_TOP_K(top_k, TOP_K, ...)                                                                                \
     switch (top_k)                                                                                                     \
     {                                                                                                                  \
+    case 10:                                                                                                           \
+    {                                                                                                                  \
+        constexpr int TOP_K = 10;                                                                                      \
+        __VA_ARGS__;                                                                                                   \
+        break;                                                                                                         \
+    }                                                                                                                  \
     case 8:                                                                                                            \
     {                                                                                                                  \
         constexpr int TOP_K = 8;                                                                                       \
