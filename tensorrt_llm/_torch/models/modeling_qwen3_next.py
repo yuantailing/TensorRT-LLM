@@ -132,8 +132,9 @@ class Qwen3NextSparseMoeBlock(nn.Module):
         self.top_k = config.num_experts_per_tok
         self.enable_attention_dp = model_config.mapping.enable_attention_dp
         self.mapping = model_config.mapping
-        self.allreduce = AllReduce(mapping=model_config.mapping,
-                                   strategy=model_config.allreduce_strategy)
+        if not self.enable_attention_dp and self.mapping.tp_size > 1:
+            self.allreduce = AllReduce(mapping=model_config.mapping,
+                                       strategy=model_config.allreduce_strategy)
         self.aux_stream = aux_stream
 
         self.gate = Qwen3NextGate(
@@ -164,6 +165,8 @@ class Qwen3NextSparseMoeBlock(nn.Module):
             bias=config.mlp_bias if hasattr(config, 'mlp_bias') else False,
             dtype=config.torch_dtype,
             config=model_config,
+            overridden_tp_size=1
+            if self.enable_attention_dp else model_config.mapping.tp_size,
             reduce_output=False,
         )
 
@@ -857,8 +860,6 @@ class Qwen3NextLinearDecoderLayer(nn.Module):
                                                 use_gemma=True)
         self.layer_idx = layer_idx
 
-        self.allreduce = AllReduce(mapping=model_config.mapping,
-                                   strategy=model_config.allreduce_strategy)
         self.next_layer_layernorm: RMSNorm = None
 
         self.fusion_config = EagerFusionConfig()
@@ -876,7 +877,11 @@ class Qwen3NextLinearDecoderLayer(nn.Module):
         self.disable_attn_allreduce = (self.fusion_config.PRE_MOE_FUSION
                                        or self.mapping.tp_size == 1
                                        or self.enable_attention_dp)
-        self.moe_allreduce = MoEAllReduce(mapping=model_config.mapping)
+        if self.fusion_config.PRE_MOE_FUSION or self.fusion_config.POST_MOE_FUSION:
+            self.allreduce = AllReduce(mapping=model_config.mapping,
+                                       strategy=model_config.allreduce_strategy)
+        if self.fusion_config.POST_MOE_FUSION:
+            self.moe_allreduce = MoEAllReduce(mapping=model_config.mapping)
 
     def forward(
         self,
@@ -920,9 +925,9 @@ class Qwen3NextLinearDecoderLayer(nn.Module):
                 hidden_states, residual)
 
         # Note: this fusion pattern is only supported for TRTLLM-nvfp4 backend now
-        do_finalize = not (hidden_states.shape[0]
+        do_finalize = not (self.fusion_config.POST_MOE_FUSION
+                           and hidden_states.shape[0]
                            <= self.moe_allreduce.max_token
-                           and self.fusion_config.POST_MOE_FUSION
                            and self.model_config.moe_backend == 'TRTLLM'
                            and self.mlp.experts.has_nvfp4)
 
@@ -1017,8 +1022,6 @@ class Qwen3NextFullAttentionDecoderLayer(DecoderLayer):
                                                 use_gemma=True)
         self.layer_idx = layer_idx
 
-        self.allreduce = AllReduce(mapping=model_config.mapping,
-                                   strategy=model_config.allreduce_strategy)
         self.next_layer_layernorm: RMSNorm = None
 
         self.fusion_config = EagerFusionConfig()
@@ -1035,7 +1038,11 @@ class Qwen3NextFullAttentionDecoderLayer(DecoderLayer):
         self.disable_attn_allreduce = (self.fusion_config.PRE_MOE_FUSION
                                        or self.mapping.tp_size == 1
                                        or self.enable_attention_dp)
-        self.moe_allreduce = MoEAllReduce(mapping=model_config.mapping)
+        if self.fusion_config.PRE_MOE_FUSION or self.fusion_config.POST_MOE_FUSION:
+            self.allreduce = AllReduce(mapping=model_config.mapping,
+                                       strategy=model_config.allreduce_strategy)
+        if self.fusion_config.POST_MOE_FUSION:
+            self.moe_allreduce = MoEAllReduce(mapping=model_config.mapping)
 
     def forward(
         self,
@@ -1079,9 +1086,9 @@ class Qwen3NextFullAttentionDecoderLayer(DecoderLayer):
                 hidden_states, residual)
 
         # Note: this fusion pattern is only supported for TRTLLM-nvfp4 backend now
-        do_finalize = not (hidden_states.shape[0]
+        do_finalize = not (self.fusion_config.POST_MOE_FUSION
+                           and hidden_states.shape[0]
                            <= self.moe_allreduce.max_token
-                           and self.fusion_config.POST_MOE_FUSION
                            and self.model_config.moe_backend == 'TRTLLM'
                            and self.mlp.experts.has_nvfp4)
 
