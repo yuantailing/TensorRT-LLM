@@ -35,15 +35,14 @@ from tensorrt_llm.mapping import Mapping
 
 from ..attention_backend import AttentionMetadata
 from ..distributed import (AllReduce, AllReduceFusionOp, AllReduceParams,
-                           MoEAllReduce, MoEAllReduceParams, allgather)
+                           MoEAllReduce, MoEAllReduceParams)
 from ..model_config import ModelConfig
 from ..modules.decoder_layer import DecoderLayer
 from ..modules.embedding import Embedding
 from ..modules.fused_moe import (BaseMoeRoutingMethod,
                                  RenormalizeMoeRoutingMethod,
                                  RenormalizeNaiveMoeRoutingMethod,
-                                 RoutingMethodType, TRTLLMGenFusedMoE,
-                                 create_moe)
+                                 RoutingMethodType, create_moe)
 from ..modules.gated_mlp import GatedMLP
 from ..modules.linear import Linear, TensorParallelMode
 from ..modules.mamba.causal_conv1d import causal_conv1d_fn, causal_conv1d_update
@@ -196,13 +195,6 @@ class Qwen3NextSparseMoeBlock(nn.Module):
             # TODO: support do_finalize == False
             raise NotImplementedError(
                 "do_finalize == False is not supported yet")
-
-        if self.enable_attention_dp and self.mapping.tp_size > 1:
-            if isinstance(self.experts, TRTLLMGenFusedMoE):
-                hidden_states = allgather(hidden_states,
-                                          self.mapping,
-                                          dim=0,
-                                          sizes=all_rank_num_tokens)
 
         def _compute_routed_output():
             router_logits = self.gate(hidden_states)
