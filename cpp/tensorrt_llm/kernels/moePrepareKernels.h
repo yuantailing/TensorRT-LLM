@@ -48,7 +48,7 @@ struct ALIGN_256 MoeCommFifoConnInfo
 {
     volatile uint64_t head;   // write position
     volatile uint64_t tail;   // read position
-    int volatile values[512]; // for values
+    int volatile values[513]; // for values
 };
 
 struct MoeCommWorkspace

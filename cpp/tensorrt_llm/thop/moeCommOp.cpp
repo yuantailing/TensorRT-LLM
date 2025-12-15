@@ -168,7 +168,7 @@ moePrepareOp(torch::Tensor expertsIds, c10::optional<torch::Tensor> expertsStati
     CHECK_INPUT(expertsIds, torch::kInt32);
     TORCH_CHECK(expertCount % 4 == 0, "expertCount must be divisible by 4");
     TORCH_CHECK(slotCount % 4 == 0, "slotCount must be divisible by 4");
-    TORCH_CHECK(expertCount + 1 <= 512, "expertCount + 1 is larger than 512");
+    TORCH_CHECK(expertCount + 1 <= 513, "expertCount + 1 is larger than 513");
 
     int64_t maxSendRanksPerToken = std::max(epSize, topK);
     int64_t tokenCount = expertsIds.size(0);
