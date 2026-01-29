@@ -4,7 +4,8 @@ from typing import Callable, List, Union
 from torch import nn
 
 from tensorrt_llm._torch.model_config import ModelConfig
-from tensorrt_llm._torch.models.modeling_utils import DecoderModelForCausalLM
+from tensorrt_llm._torch.models.modeling_utils import (DecoderModelForCausalLM,
+                                                       filter_weights)
 
 
 class BaseWeightMapper(ABC):
@@ -147,13 +148,9 @@ class BaseWeightMapper(ABC):
         return any(skip_module in module_name
                    for skip_module in self._skip_modules)
 
-    def filter_weights(self, prefix: str, weights: dict) -> dict:
-        result = {}
-        for k, v in weights.items():
-            if k.startswith(prefix):
-                new_k = k[len(prefix) + 1:]
-                result[new_k] = v
-        return result
+    @staticmethod
+    def filter_weights(prefix: str, weights: dict) -> dict:
+        return filter_weights(prefix, weights)
 
     @property
     def mapping(self) -> dict:
