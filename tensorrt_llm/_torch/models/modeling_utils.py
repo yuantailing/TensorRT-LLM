@@ -1,3 +1,4 @@
+import bisect
 import contextlib
 import inspect
 import math
@@ -779,7 +780,84 @@ def rename_weights_with_regex(pattern_mapping: Dict[str, str], weights: Dict):
     return renamed_weights
 
 
+class IndexedWeights(dict):
+    """A frozen dict subclass with sorted keys index for fast prefix-based filtering.
+
+    This class maintains a sorted list of keys to enable O(log n + k) prefix
+    filtering using binary search, where n is the total number of keys and k
+    is the number of matching keys. This is significantly faster than the
+    naive O(n) approach when filtering is performed multiple times on the
+    same dictionary.
+
+    The dictionary is frozen after creation to ensure the sorted keys index
+    remains consistent. Any attempt to modify the dictionary will raise TypeError.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._sorted_keys = sorted(self.keys())
+
+    def _raise_frozen_error(self, *args, **kwargs):
+        raise TypeError("IndexedWeights is frozen and cannot be modified")
+
+    # Disable all mutation operations
+    __setitem__ = _raise_frozen_error
+    __delitem__ = _raise_frozen_error
+    pop = _raise_frozen_error
+    popitem = _raise_frozen_error
+    clear = _raise_frozen_error
+    update = _raise_frozen_error
+    setdefault = _raise_frozen_error
+
+    def filter_by_prefix(self, prefix: str) -> Dict:
+        """Filter weights by prefix using binary search.
+
+        Strictly follows the original filter_weights logic:
+        - Matches all keys that start with prefix
+        - Strips prefix and the following one character from matching keys
+
+        Args:
+            prefix: The prefix to filter by.
+
+        Returns:
+            A new dict containing only the keys that start with the prefix,
+            with the prefix and following character removed from the keys.
+        """
+        # Find the range of keys that start with prefix
+        # Left boundary: first key >= prefix
+        left = bisect.bisect_left(self._sorted_keys, prefix)
+
+        # Right boundary: first key that doesn't start with prefix
+        # This is the first key >= prefix + chr(max_unicode_char + 1)
+        # But practically, we can use prefix[:-1] + chr(ord(prefix[-1]) + 1)
+        # to find the upper bound
+        if prefix:
+            prefix_upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+            right = bisect.bisect_left(self._sorted_keys, prefix_upper)
+        else:
+            # Empty prefix matches everything
+            right = len(self._sorted_keys)
+
+        # Extract matching keys and strip prefix + 1 char (same as original)
+        result = {}
+        prefix_len_plus_one = len(prefix) + 1
+        for i in range(left, right):
+            k = self._sorted_keys[i]
+            new_k = k[prefix_len_plus_one:]
+            result[new_k] = self[k]
+        return result
+
+
 def filter_weights(prefix, weights: Dict):
+    """Filter weights by prefix.
+
+    If weights is an IndexedWeights instance, uses fast binary search.
+    Otherwise, falls back to linear scan.
+    """
+    if isinstance(weights, IndexedWeights):
+        return weights.filter_by_prefix(prefix)
+
+    # Fallback for regular dict
     result = {}
     for k, v in weights.items():
         if k.startswith(prefix):

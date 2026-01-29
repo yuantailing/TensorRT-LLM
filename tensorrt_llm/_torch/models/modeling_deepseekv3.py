@@ -66,8 +66,8 @@ from ..speculative import SpecMetadata
 from ..utils import (AuxStreamType, EventType, Fp4QuantizedTensor,
                      create_lm_head_tp_mapping)
 from .modeling_speculative import SpecDecOneEngineForCausalLM
-from .modeling_utils import (DecoderModel, EagerFusionConfig, filter_weights,
-                             register_auto_model)
+from .modeling_utils import (DecoderModel, EagerFusionConfig, IndexedWeights,
+                             filter_weights, register_auto_model)
 
 
 @triton.jit
@@ -317,6 +317,9 @@ class DeepseekV3WeightLoader:
 
         params_map = {'gate_up_proj': ['gate_proj', 'up_proj']}
         all_named_modules = dict(self.model.named_modules())
+
+        # Convert weights to IndexedWeights for faster prefix-based filtering
+        weights = IndexedWeights(weights)
 
         for name, module in tqdm(all_named_modules.items(),
                                  desc="Loading weights"):
