@@ -163,6 +163,7 @@ kv_cache_manager = Runner.create_kv_cache_manager(
     tokens_per_block=args.tokens_per_block,
     max_batch_size=args.max_batch_size,
     max_seq_len=args.max_seq_len,
+    max_num_tokens=args.max_num_tokens,
     kv_cache_dtype=args.kv_cache_dtype,
     mamba_ssm_cache_dtype=args.mamba_ssm_cache_dtype,
     layer_indices=args.layer_indices,

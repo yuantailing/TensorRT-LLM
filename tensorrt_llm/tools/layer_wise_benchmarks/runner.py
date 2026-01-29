@@ -15,6 +15,7 @@ from tensorrt_llm._torch.attention_backend.utils import get_attention_backend
 from tensorrt_llm._torch.custom_ops.cute_dsl_custom_ops import GroupedGemmInputsHelper
 from tensorrt_llm._torch.metadata import KVCacheParams
 from tensorrt_llm._torch.model_config import ModelConfig
+from tensorrt_llm._torch.models.modeling_gpt_oss import Transformer as GptOssTransformer
 from tensorrt_llm._torch.models.modeling_utils import PostInitCaller, skip_forward
 from tensorrt_llm._torch.modules.fused_moe.fused_moe_cutlass import CutlassFusedMoE
 from tensorrt_llm._torch.modules.fused_moe.fused_moe_trtllm_gen import TRTLLMGenFusedMoE
@@ -403,7 +404,7 @@ class Runner:
         max_seq_len: int,
         max_num_tokens: int,
         moe_max_num_tokens: int,
-        kv_cache_dtype,
+        kv_cache_dtype: str,
         mamba_ssm_cache_dtype: str,
         use_low_precision_moe_combine: bool,
         use_cuda_graph: bool,
@@ -443,9 +444,10 @@ class Runner:
 
         def forward(position_ids, hidden_states, attn_metadata, residual, **kwargs):
             # TODO: to be more general, we should call DecoderModel.forward
-            residual_fusion = hasattr(model.model.layers[layer_indices[0]], "next_layer_layernorm")
+            layers = self._get_layers(model)
+            residual_fusion = hasattr(layers[layer_indices[0]], "next_layer_layernorm")
             for layer_idx in layer_indices:
-                layer = model.model.layers[layer_idx]
+                layer = layers[layer_idx]
                 if residual_fusion:
                     hidden_states, residual = layer(
                         position_ids, hidden_states, attn_metadata, residual, **kwargs
@@ -459,6 +461,13 @@ class Runner:
         self.model_config = model.model_config
         self.model = model
         self.layer_indices = layer_indices
+
+    @staticmethod
+    def _get_layers(model):
+        if isinstance(model.model, GptOssTransformer):
+            return model.model.block
+        else:
+            return model.model.layers
 
     @staticmethod
     @contextlib.contextmanager
@@ -564,15 +573,20 @@ class Runner:
             num_hidden_layers = model.model_config.pretrained_config.num_hidden_layers
             if hasattr(model.model, "embed_tokens"):
                 skip_forward(model.model.embed_tokens)
+            layers = Runner._get_layers(model)
             for layer_idx in range(num_hidden_layers):
-                layer = model.model.layers[layer_idx]
+                layer = layers[layer_idx]
                 if layer_idx not in layer_indices:
                     # keep next layer's input_layernorm's weights for fusion
+                    if isinstance(model.model, GptOssTransformer):
+                        next_layer_layernorm_of_prev_layer = layer.attn.norm
+                    else:
+                        next_layer_layernorm_of_prev_layer = layer.input_layer_norm
                     skip_forward(
                         layer,
-                        ignore_modules=[layer.input_layernorm]
+                        ignore_modules=[next_layer_layernorm_of_prev_layer]
                         if layer_idx - 1 in layer_indices
-                        and hasattr(model.model.layers[layer_idx - 1], "next_layer_layernorm")
+                        and hasattr(layers[layer_idx - 1], "next_layer_layernorm")
                         else None,
                     )
             if hasattr(model.model, "norm"):
@@ -698,9 +712,10 @@ class Runner:
             if self.model_config.mapping.enable_attention_dp
             else 0
         )
+        layers = self._get_layers(self.model)
         moe_modules = []
         for layer_idx in self.layer_indices:
-            layer = self.model.model.layers[layer_idx]
+            layer = layers[layer_idx]
             if layer.__class__.__name__ == "NemotronHLayer":
                 if layer.layer_type == "E":
                     moe_modules.append(layer.mixer.experts)
@@ -763,6 +778,7 @@ class Runner:
         tokens_per_block,
         max_batch_size,
         max_seq_len,
+        max_num_tokens,
         kv_cache_dtype,
         mamba_ssm_cache_dtype,
         layer_indices,
@@ -781,11 +797,13 @@ class Runner:
             max_tokens=max_batch_size * round_up(max_seq_len, tokens_per_block),
             enable_block_reuse=False,
         )
-        kv_cache_dtype = {
-            "FP8": tensorrt_llm.bindings.DataType.FP8,
-            "NVFP4": tensorrt_llm.bindings.DataType.NVFP4,
-            None: torch_dtype_to_binding(config.torch_dtype),
-        }[model_config.quant_config.kv_cache_quant_algo]
+        if model_config.quant_config.kv_cache_quant_algo is None:
+            kv_cache_dtype = torch_dtype_to_binding(config.torch_dtype)
+        else:
+            kv_cache_dtype = {
+                "FP8": tensorrt_llm.bindings.DataType.FP8,
+                "NVFP4": tensorrt_llm.bindings.DataType.NVFP4,
+            }[model_config.quant_config.kv_cache_quant_algo]
         if is_mla(config):
             layer_mask = [i in layer_indices for i in range(config.num_hidden_layers)]
             num_layers = sum(layer_mask)
@@ -882,7 +900,26 @@ class Runner:
                 spec_config=None,
             )
         else:
-            raise NotImplementedError("Unsupported config")
+            layer_mask = [i in layer_indices for i in range(config.num_hidden_layers)]
+            num_layers = sum(layer_mask)
+            kv_cache_manager = kv_cache_manager_cls(
+                kv_cache_config,
+                tensorrt_llm.bindings.internal.batch_manager.CacheType.SELF,
+                num_layers=num_layers,
+                layer_mask=layer_mask,
+                num_kv_heads=config.num_key_value_heads,
+                head_dim=config.head_dim,
+                tokens_per_block=tokens_per_block,
+                max_seq_len=max_seq_len,
+                max_batch_size=max_batch_size,
+                mapping=mapping,
+                dtype=kv_cache_dtype,
+                spec_config=None,
+                max_num_tokens=max_num_tokens,
+                max_beam_width=1,
+                is_draft=False,
+                sparse_attn_config=model_config.sparse_attention_config,
+            )
         kv_cache_manager.add_dummy_requests(
             list(range(max_batch_size)), [max_seq_len] * max_batch_size
         )
