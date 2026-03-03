@@ -245,11 +245,11 @@ if(BUILD_DEEP_EP
    OR BUILD_DEEP_GEMM
    OR BUILD_FLASH_MLA)
   FetchContent_MakeAvailable(pybind11)
-  include_directories(${CMAKE_BINARY_DIR}/_deps/pybind11-src/include)
+  include_directories(${pybind11_SOURCE_DIR}/include)
 endif()
 
 FetchContent_MakeAvailable(nanobind)
-include_directories(${CMAKE_BINARY_DIR}/_deps/nanobind-src/include)
+include_directories(${nanobind_SOURCE_DIR}/include)
 
 FetchContent_MakeAvailable(cutlass cxxopts flashmla json xgrammar)
 
@@ -266,7 +266,7 @@ if(BUILD_DEEP_GEMM)
 endif()
 
 if(NOT NVTX_DISABLE)
-  set(maybe_nvtx_includedir ${CMAKE_BINARY_DIR}/_deps/nvtx-src/include)
+  set(maybe_nvtx_includedir ${nvtx_SOURCE_DIR}/include)
 endif()
 
 # include as system to suppress warnings
@@ -277,9 +277,9 @@ include_directories(
   ${CUDNN_ROOT_DIR}/include
   $<TARGET_PROPERTY:TensorRT::NvInfer,INTERFACE_INCLUDE_DIRECTORIES>
   ${maybe_nvtx_includedir}
-  ${CMAKE_BINARY_DIR}/_deps/cutlass-src/include
-  ${CMAKE_BINARY_DIR}/_deps/cutlass-src/tools/util/include
-  ${CMAKE_BINARY_DIR}/_deps/json-src/include)
+  ${cutlass_SOURCE_DIR}/include
+  ${cutlass_SOURCE_DIR}/tools/util/include
+  ${json_SOURCE_DIR}/include)
 
 if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "11")
   add_definitions("-DENABLE_BF16")
@@ -542,7 +542,7 @@ print(os.path.dirname(torch.__file__),end='');"
   endif()
   list(APPEND CMAKE_PREFIX_PATH ${TORCH_DIR})
   set(USE_SYSTEM_NVTX ON)
-  set(nvtx3_dir ${CMAKE_BINARY_DIR}/_deps/nvtx-src/include)
+  set(nvtx3_dir ${nvtx_SOURCE_DIR}/include)
   set(CMAKE_CUDA_ARCHITECTURES_BACKUP ${CMAKE_CUDA_ARCHITECTURES})
   find_package(Torch REQUIRED)
   set(CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES_BACKUP})
@@ -594,15 +594,14 @@ if(ENABLE_UCX)
   if(NOT ${ucx_FOUND})
     set(ENABLE_UCX 0)
   else()
-    set(ucxx_source_dir ${CMAKE_BINARY_DIR}/_deps/ucxx-src)
     if(DEFINED ENV{GITHUB_MIRROR} AND NOT "$ENV{GITHUB_MIRROR}" STREQUAL "")
-      if(EXISTS "${ucxx_source_dir}/fetch_rapids.cmake")
-        file(READ "${ucxx_source_dir}/fetch_rapids.cmake" FILE_CONTENTS)
+      if(EXISTS "${ucxx_SOURCE_DIR}/fetch_rapids.cmake")
+        file(READ "${ucxx_SOURCE_DIR}/fetch_rapids.cmake" FILE_CONTENTS)
         string(
           REPLACE "https://raw.githubusercontent.com/rapidsai/rapids-cmake"
                   "$ENV{GITHUB_MIRROR}/rapidsai/rapids-cmake/raw/refs/heads"
                   FILE_CONTENTS "${FILE_CONTENTS}")
-        file(WRITE "${ucxx_source_dir}/fetch_rapids.cmake" "${FILE_CONTENTS}")
+        file(WRITE "${ucxx_SOURCE_DIR}/fetch_rapids.cmake" "${FILE_CONTENTS}")
         message(WARNING "Replace UCXX fetch_rapids.cmake with internal mirror")
       endif()
     endif()
@@ -613,7 +612,7 @@ if(ENABLE_UCX)
     execute_process(
       COMMAND
         ${CMAKE_COMMAND} -E env LIB_BUILD_DIR=${CMAKE_BINARY_DIR}/ucxx/build
-        ${ucxx_source_dir}/build.sh libucxx -n
+        ${ucxx_SOURCE_DIR}/build.sh libucxx -n
         --cmake-args=\"-DBUILD_SHARED_LIBS=OFF
         -DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=${USE_CXX11_ABI}\"
       OUTPUT_VARIABLE UCXX_BUILD_OUTPUT

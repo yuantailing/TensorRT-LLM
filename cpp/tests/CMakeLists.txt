@@ -19,12 +19,11 @@ include(FetchContent)
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
 
-set(cutlass_source_dir ${CMAKE_BINARY_DIR}/_deps/cutlass-src)
 include_directories(
   ${PROJECT_SOURCE_DIR}/tensorrt_llm/cutlass_extensions/include
   ${PROJECT_SOURCE_DIR}/include
-  ${cutlass_source_dir}/include
-  ${cutlass_source_dir}/tools/util/include
+  ${cutlass_SOURCE_DIR}/include
+  ${cutlass_SOURCE_DIR}/tools/util/include
   ${PROJECT_SOURCE_DIR}/tests/batch_manager
   ${PROJECT_SOURCE_DIR}/tests/utils)
 

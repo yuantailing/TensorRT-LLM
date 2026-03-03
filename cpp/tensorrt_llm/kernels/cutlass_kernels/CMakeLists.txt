@@ -27,16 +27,15 @@ if(NOT Python3_EXECUTABLE)
     REQUIRED)
 endif()
 
-set(cutlass_source_dir ${CMAKE_BINARY_DIR}/_deps/cutlass-src)
 execute_process(
-  WORKING_DIRECTORY ${cutlass_source_dir}/python/
+  WORKING_DIRECTORY ${cutlass_SOURCE_DIR}/python/
   COMMAND ${Python3_EXECUTABLE} setup_library.py develop --user
   RESULT_VARIABLE _CUTLASS_LIBRARY_SUCCESS)
 
 if(NOT _CUTLASS_LIBRARY_SUCCESS EQUAL 0)
   message(
     FATAL_ERROR
-      "Failed to set up the CUTLASS library in ${cutlass_source_dir} due to"
+      "Failed to set up the CUTLASS library in ${cutlass_SOURCE_DIR} due to"
       " ${_CUTLASS_LIBRARY_SUCCESS}.")
 endif()
 
@@ -223,7 +222,7 @@ if(USING_OSS_CUTLASS_LOW_LATENCY_GEMM)
   add_library(low_latency_gemm_src STATIC ${LOW_LATENCY_GEMM_SRC_CU})
   set_cuda_architectures(low_latency_gemm_src 90)
   target_include_directories(low_latency_gemm_src
-                             PRIVATE ${cutlass_source_dir}/examples)
+                             PRIVATE ${cutlass_SOURCE_DIR}/examples)
 endif()
 
 if(USING_OSS_CUTLASS_FP4_GEMM)

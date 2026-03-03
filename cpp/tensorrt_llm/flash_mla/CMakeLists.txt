@@ -8,11 +8,10 @@ endif()
 # =============
 
 # Use FlashMLA submodule
-set(FLASH_MLA_SOURCE_DIR ${CMAKE_BINARY_DIR}/_deps/flashmla-src)
-get_filename_component(FLASH_MLA_SOURCE_DIR ${FLASH_MLA_SOURCE_DIR} ABSOLUTE)
+get_filename_component(flashmla_SOURCE_DIR ${flashmla_SOURCE_DIR} ABSOLUTE)
 
 # Check if submodules are initialized
-if(NOT EXISTS ${FLASH_MLA_SOURCE_DIR}/csrc/cutlass/include)
+if(NOT EXISTS ${flashmla_SOURCE_DIR}/csrc/cutlass/include)
   message(
     FATAL_ERROR
       "FlashMLA submodules not initialized. Something went wrong with FetchContent"
@@ -87,12 +86,12 @@ file(REMOVE_RECURSE ${FLASH_MLA_PYTHON_DEST})
 file(MAKE_DIRECTORY ${FLASH_MLA_PYTHON_DEST})
 
 # Copy all files from flash_mla directory
-file(GLOB_RECURSE FLASH_MLA_ALL_FILES ${FLASH_MLA_SOURCE_DIR}/flash_mla/*)
-configure_file(${FLASH_MLA_SOURCE_DIR}/LICENSE ${FLASH_MLA_PYTHON_DEST}/LICENSE
+file(GLOB_RECURSE FLASH_MLA_ALL_FILES ${flashmla_SOURCE_DIR}/flash_mla/*)
+configure_file(${flashmla_SOURCE_DIR}/LICENSE ${FLASH_MLA_PYTHON_DEST}/LICENSE
                COPYONLY)
 
 foreach(SOURCE_FILE ${FLASH_MLA_ALL_FILES})
-  file(RELATIVE_PATH REL_PATH ${FLASH_MLA_SOURCE_DIR}/flash_mla ${SOURCE_FILE})
+  file(RELATIVE_PATH REL_PATH ${flashmla_SOURCE_DIR}/flash_mla ${SOURCE_FILE})
   get_filename_component(REL_DIR ${REL_PATH} DIRECTORY)
   file(MAKE_DIRECTORY ${FLASH_MLA_PYTHON_DEST}/${REL_DIR})
 
@@ -141,18 +140,18 @@ find_library(TORCH_PYTHON_LIB torch_python REQUIRED
 # checks (arch.is_sm90()), but still references all kernel symbols We compile
 # all sources to avoid undefined symbols at module load time
 set(FLASH_MLA_SOURCES
-    ${FLASH_MLA_SOURCE_DIR}/csrc/pybind.cpp
-    ${FLASH_MLA_SOURCE_DIR}/csrc/smxx/get_mla_metadata.cu
-    ${FLASH_MLA_SOURCE_DIR}/csrc/smxx/mla_combine.cu)
+    ${flashmla_SOURCE_DIR}/csrc/pybind.cpp
+    ${flashmla_SOURCE_DIR}/csrc/smxx/get_mla_metadata.cu
+    ${flashmla_SOURCE_DIR}/csrc/smxx/mla_combine.cu)
 
 # Add SM90 sources (always include if CUDA >= 12.3)
 if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.3)
   list(
     APPEND
     FLASH_MLA_SOURCES
-    ${FLASH_MLA_SOURCE_DIR}/csrc/sm90/decode/dense/splitkv_mla.cu
-    ${FLASH_MLA_SOURCE_DIR}/csrc/sm90/decode/sparse_fp8/splitkv_mla.cu
-    ${FLASH_MLA_SOURCE_DIR}/csrc/sm90/prefill/sparse/fwd.cu)
+    ${flashmla_SOURCE_DIR}/csrc/sm90/decode/dense/splitkv_mla.cu
+    ${flashmla_SOURCE_DIR}/csrc/sm90/decode/sparse_fp8/splitkv_mla.cu
+    ${flashmla_SOURCE_DIR}/csrc/sm90/prefill/sparse/fwd.cu)
 endif()
 
 # Add SM100 sources (always include if CUDA >= 12.9)
@@ -160,10 +159,10 @@ if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.9)
   list(
     APPEND
     FLASH_MLA_SOURCES
-    ${FLASH_MLA_SOURCE_DIR}/csrc/sm100/decode/sparse_fp8/splitkv_mla.cu
-    ${FLASH_MLA_SOURCE_DIR}/csrc/sm100/prefill/dense/fmha_cutlass_fwd_sm100.cu
-    ${FLASH_MLA_SOURCE_DIR}/csrc/sm100/prefill/dense/fmha_cutlass_bwd_sm100.cu
-    ${FLASH_MLA_SOURCE_DIR}/csrc/sm100/prefill/sparse/fwd.cu)
+    ${flashmla_SOURCE_DIR}/csrc/sm100/decode/sparse_fp8/splitkv_mla.cu
+    ${flashmla_SOURCE_DIR}/csrc/sm100/prefill/dense/fmha_cutlass_fwd_sm100.cu
+    ${flashmla_SOURCE_DIR}/csrc/sm100/prefill/dense/fmha_cutlass_bwd_sm100.cu
+    ${flashmla_SOURCE_DIR}/csrc/sm100/prefill/sparse/fwd.cu)
 endif()
 
 # Disable LTO before creating target (similar to DeepEP) Let CMake generate
@@ -229,10 +228,10 @@ target_compile_definitions(flash_mla_cpp_tllm
 target_include_directories(
   flash_mla_cpp_tllm
   PRIVATE ${CUDA_INCLUDE_DIRS}
-          ${FLASH_MLA_SOURCE_DIR}/csrc
-          ${FLASH_MLA_SOURCE_DIR}/csrc/sm90
-          ${FLASH_MLA_SOURCE_DIR}/csrc/cutlass/include
-          ${FLASH_MLA_SOURCE_DIR}/csrc/cutlass/tools/util/include)
+          ${flashmla_SOURCE_DIR}/csrc
+          ${flashmla_SOURCE_DIR}/csrc/sm90
+          ${flashmla_SOURCE_DIR}/csrc/cutlass/include
+          ${flashmla_SOURCE_DIR}/csrc/cutlass/tools/util/include)
 
 # Link libraries (matching FlashMLA setup.py: cuda, cudart + torch)
 target_link_libraries(

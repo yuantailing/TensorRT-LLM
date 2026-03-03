@@ -128,8 +128,7 @@ target_link_libraries(executorExampleLogitsProcessor
 
 # Advanced
 if(NOT TARGET cxxopts::cxxopts)
-  add_subdirectory(${CMAKE_BINARY_DIR}/_deps/cxxopts-src
-                   ${CMAKE_CURRENT_BINARY_DIR}/cxxopts)
+  add_subdirectory(${cxxopts_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/cxxopts)
 endif()
 
 add_executable(executorExampleAdvanced executorExampleAdvanced.cpp)

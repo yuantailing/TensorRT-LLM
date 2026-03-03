@@ -5,7 +5,7 @@ if(ENABLE_UCX)
   find_package(ucxx REQUIRED)
   find_package(Torch REQUIRED)
 
-  include_directories(${CMAKE_BINARY_DIR}/_deps/cppzmq-src)
+  include_directories(${cppzmq_SOURCE_DIR})
 
   # Find and link ZMQ
   find_package(PkgConfig REQUIRED)

@@ -158,7 +158,7 @@ void unload_fmha_d64_fp32_f30323ef_0d1d2d3d4d5d6789(void) {
 As the generated code didn't check the value of the module object, this function might unload the same module multiple times, which will cause an error as follows:
 
 ```
-Triton Error [CUDA]: invalid resource handle\n/opt/rapids/src/cudf/cpp/build/_deps/arrow-src/cpp/src/arrow/filesystem/s3fs.cc:2904:  arrow::fs::FinalizeS3 was not called even though S3 was initialized.  This could lead to a segmentation fault at exit
+Triton Error [CUDA]: invalid resource handle\n/opt/rapids/src/cudf/cpp/build/_fetchcontent_base/arrow-src/cpp/src/arrow/filesystem/s3fs.cc:2904:  arrow::fs::FinalizeS3 was not called even though S3 was initialized.  This could lead to a segmentation fault at exit
 ```
 
 The error message is ambiguous. If we use compute-sanitizer to help debug, we can get the following information:

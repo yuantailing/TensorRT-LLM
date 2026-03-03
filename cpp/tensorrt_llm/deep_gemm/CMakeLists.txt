@@ -8,11 +8,10 @@ endif()
 # =============
 
 # Use DeepGEMM submodule
-set(DEEP_GEMM_SOURCE_DIR ${CMAKE_BINARY_DIR}/_deps/deepgemm-src)
-get_filename_component(DEEP_GEMM_SOURCE_DIR ${DEEP_GEMM_SOURCE_DIR} ABSOLUTE)
+get_filename_component(deepgemm_SOURCE_DIR ${deepgemm_SOURCE_DIR} ABSOLUTE)
 
 # Check if submodules are initialized
-if(NOT EXISTS ${DEEP_GEMM_SOURCE_DIR}/third-party/cutlass/include)
+if(NOT EXISTS ${deepgemm_SOURCE_DIR}/third-party/cutlass/include)
   message(
     FATAL_ERROR
       "DeepGEMM submodules not initialized. Something went wrong with FetchContent.\n"
@@ -25,11 +24,11 @@ file(REMOVE_RECURSE ${DEEP_GEMM_PYTHON_DEST})
 file(MAKE_DIRECTORY ${DEEP_GEMM_PYTHON_DEST})
 
 # Copy all files from deep_gemm directory
-file(GLOB_RECURSE DEEP_GEMM_ALL_FILES ${DEEP_GEMM_SOURCE_DIR}/deep_gemm/*)
-configure_file(${DEEP_GEMM_SOURCE_DIR}/LICENSE ${DEEP_GEMM_PYTHON_DEST}/LICENSE
+file(GLOB_RECURSE DEEP_GEMM_ALL_FILES ${deepgemm_SOURCE_DIR}/deep_gemm/*)
+configure_file(${deepgemm_SOURCE_DIR}/LICENSE ${DEEP_GEMM_PYTHON_DEST}/LICENSE
                COPYONLY)
 foreach(SOURCE_FILE ${DEEP_GEMM_ALL_FILES})
-  file(RELATIVE_PATH REL_PATH ${DEEP_GEMM_SOURCE_DIR}/deep_gemm ${SOURCE_FILE})
+  file(RELATIVE_PATH REL_PATH ${deepgemm_SOURCE_DIR}/deep_gemm ${SOURCE_FILE})
   get_filename_component(REL_DIR ${REL_PATH} DIRECTORY)
   file(MAKE_DIRECTORY ${DEEP_GEMM_PYTHON_DEST}/${REL_DIR})
 
@@ -73,9 +72,9 @@ endforeach()
 # Copy third-party includes (cutlass and fmt) to the include directory
 set(DEEP_GEMM_INCLUDE_DEST ${DEEP_GEMM_PYTHON_DEST}/include)
 file(MAKE_DIRECTORY ${DEEP_GEMM_INCLUDE_DEST})
-file(COPY ${DEEP_GEMM_SOURCE_DIR}/third-party/cutlass/include/cute
+file(COPY ${deepgemm_SOURCE_DIR}/third-party/cutlass/include/cute
      DESTINATION ${DEEP_GEMM_INCLUDE_DEST})
-file(COPY ${DEEP_GEMM_SOURCE_DIR}/third-party/cutlass/include/cutlass
+file(COPY ${deepgemm_SOURCE_DIR}/third-party/cutlass/include/cutlass
      DESTINATION ${DEEP_GEMM_INCLUDE_DEST})
 
 # Find torch_python
@@ -83,7 +82,7 @@ find_library(TORCH_PYTHON_LIB torch_python REQUIRED
              HINTS ${TORCH_INSTALL_PREFIX}/lib)
 
 # Build deep_gemm_cpp_tllm extension (matching deep_gemm's setup.py)
-set(DEEP_GEMM_SOURCES ${DEEP_GEMM_SOURCE_DIR}/csrc/python_api.cpp)
+set(DEEP_GEMM_SOURCES ${deepgemm_SOURCE_DIR}/csrc/python_api.cpp)
 
 pybind11_add_module(deep_gemm_cpp_tllm ${DEEP_GEMM_SOURCES})
 set_target_properties(
@@ -106,9 +105,9 @@ target_compile_definitions(deep_gemm_cpp_tllm
 # Include directories matching deep_gemm setup.py
 target_include_directories(
   deep_gemm_cpp_tllm
-  PRIVATE ${CUDA_INCLUDE_DIRS} ${DEEP_GEMM_SOURCE_DIR}/deep_gemm/include
-          ${DEEP_GEMM_SOURCE_DIR}/third-party/cutlass/include
-          ${DEEP_GEMM_SOURCE_DIR}/third-party/fmt/include)
+  PRIVATE ${CUDA_INCLUDE_DIRS} ${deepgemm_SOURCE_DIR}/deep_gemm/include
+          ${deepgemm_SOURCE_DIR}/third-party/cutlass/include
+          ${deepgemm_SOURCE_DIR}/third-party/fmt/include)
 
 # Link libraries (matching deep_gemm setup.py: cuda, cudart + torch)
 target_link_libraries(

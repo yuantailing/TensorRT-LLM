@@ -67,8 +67,10 @@ def get_build_dir(build_dir, build_type):
     return build_dir
 
 
-def clear_folder(folder_path):
+def clear_folder(folder_path, exclude=[]):
     for item in os.listdir(folder_path):
+        if item in exclude:
+            continue
         item_path = os.path.join(folder_path, item)
         try:
             if os.path.isdir(item_path) and not os.path.islink(item_path):
@@ -585,7 +587,8 @@ def main(*,
     first_build = not Path(build_dir, "CMakeFiles").exists()
 
     if clean and build_dir.exists():
-        clear_folder(build_dir)  # Keep the folder in case it is mounted.
+        # Keep the folder in case it is mounted.
+        clear_folder(build_dir, exclude=["_fetchcontent_base"])
     build_dir.mkdir(parents=True, exist_ok=True)
 
     if use_ccache:
@@ -653,9 +656,10 @@ def main(*,
             build_run(
                 f"\"{venv_conan}\" install --build=missing --no-remote --output-folder={build_dir}/conan -s 'build_type={build_type}' {source_dir}"
             )
-            cmake_def_args.append(
-                f"-DCMAKE_TOOLCHAIN_FILE={build_dir}/conan/conan_toolchain.cmake"
-            )
+            cmake_def_args.extend([
+                f"-DCMAKE_TOOLCHAIN_FILE={build_dir}/conan/conan_toolchain.cmake",
+                f"-DFETCHCONTENT_BASE_DIR={build_dir}/_fetchcontent_base",
+            ])
             if internal_cutlass_kernels_root:
                 cmake_def_args.append(
                     f"-DINTERNAL_CUTLASS_KERNELS_PATH={internal_cutlass_kernels_root}"
